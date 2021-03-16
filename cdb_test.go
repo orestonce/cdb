@@ -2,6 +2,7 @@ package cdb_test
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/orestonce/cdb"
 	"io/ioutil"
 	"os"
@@ -9,29 +10,46 @@ import (
 	"testing"
 )
 
+func TestNewMemoryBuilder3(t *testing.T) {
+	builder := cdb.NewMemoryWriter()
+	err := builder.WriteKeyValue([]byte("key"), []byte("v"))
+	if err != nil {
+		panic(err)
+	}
+	db, err := builder.Freeze()
+	if err != nil {
+		panic(err)
+	}
+	value, err := db.GetValue([]byte("key"))
+	if err != nil {
+		panic(err)
+	}
+	if !bytes.Equal(value, []byte("v")) {
+		panic("value not equal " + string(value))
+	}
+	err = builder.Close()
+	if err != nil {
+		panic(err)
+	}
+}
+
 func TestNewMemoryBuilder(t *testing.T) {
-	builder := cdb.NewMemoryBuilder()
-	err := builder.Close()
+	builder := cdb.NewMemoryWriter()
+	db, err := builder.Freeze()
 	if err != nil {
 		panic(err)
 	}
-	db := builder.GetCdb()
-	num, err := db.GetRecordNum()
-	if err != nil {
-		panic(err)
-	}
+	num := db.GetRecordNum()
 	if num != 0 {
 		panic("expected 0 num: " + strconv.Itoa(num))
 	}
-	if len(builder.GetBytes()) != 2048 {
-		panic("expect 2048, " + strconv.Itoa(len(builder.GetBytes())))
+	it := db.NewIterator()
+	if _, _, err = it.ReadNextKeyValue(); err != cdb.ErrNoData {
+		panic("expect !it.HasNext()")
 	}
-	it, err := db.NewIterator()
+	err = builder.Close()
 	if err != nil {
 		panic(err)
-	}
-	if it.HasNext() {
-		panic("expect !it.HasNext()")
 	}
 }
 
@@ -43,31 +61,38 @@ var keyValueMap = map[string][]string{
 }
 
 func TestNewMemoryBuilder2(t *testing.T) {
-	builder := cdb.NewMemoryBuilder()
+	builder := cdb.NewMemoryWriter()
 	for key, valueList := range keyValueMap {
 		for _, value := range valueList {
-			err := builder.PutKeyData([]byte(key), []byte(value))
+			err := builder.WriteKeyValue([]byte(key), []byte(value))
 			if err != nil {
 				panic(err)
 			}
 		}
 	}
-	err := builder.Close()
+	db, err := builder.Freeze()
 	if err != nil {
 		panic(err)
 	}
-	db := builder.GetCdb()
 	assertDbEqual(db)
+	err = builder.Close()
+	if err != nil {
+		panic(err)
+	}
 	const testFileName = "testdata/TestNewMemoryBuilder2.cdb"
-	err = ioutil.WriteFile(testFileName, builder.GetBytes(), 0777)
+	data, err := builder.GetBytes()
 	if err != nil {
 		panic(err)
 	}
-	db, err = cdb.Open(testFileName)
+	err = ioutil.WriteFile(testFileName, data, 0777)
 	if err != nil {
 		panic(err)
 	}
-	dbValue1, err := db.Data([]byte("k1"))
+	db, err = cdb.OpenFile(testFileName)
+	if err != nil {
+		panic(err)
+	}
+	dbValue1, err := db.GetValue([]byte("k1"))
 	if err != nil {
 		panic(err)
 	}
@@ -86,13 +111,13 @@ func TestNewMemoryBuilder2(t *testing.T) {
 
 func TestNewFileBuilder(t *testing.T) {
 	const testFileName = "testdata/TestNewFileBuilder.cdb"
-	builder, err := cdb.NewFileBuilder(testFileName)
+	builder, err := cdb.NewFileWriter(testFileName)
 	if err != nil {
 		panic(err)
 	}
 	for key, valueList := range keyValueMap {
 		for _, value := range valueList {
-			err = builder.PutKeyData([]byte(key), []byte(value))
+			err = builder.WriteKeyValue([]byte(key), []byte(value))
 			if err != nil {
 				panic(err)
 			}
@@ -102,7 +127,7 @@ func TestNewFileBuilder(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	db, err := cdb.Open(testFileName)
+	db, err := cdb.OpenFile(testFileName)
 	if err != nil {
 		panic(err)
 	}
@@ -119,9 +144,9 @@ func TestNewFileBuilder(t *testing.T) {
 
 func assertDbEqual(db *cdb.Cdb) {
 	for key, valueList := range keyValueMap {
-		db.FindStart()
+		it := db.FindKey([]byte(key))
 		for idx, value := range valueList {
-			dbValue, err := db.FindNextData([]byte(key))
+			_, dbValue, err := it.ReadNextKeyValue()
 			if err != nil {
 				panic(err)
 			}
@@ -129,13 +154,17 @@ func assertDbEqual(db *cdb.Cdb) {
 				panic("value not equal " + key + " " + strconv.Itoa(idx))
 			}
 		}
+		_, _, err := it.ReadNextKeyValue()
+		if err != cdb.ErrNoData {
+			panic(fmt.Sprint("unexpected error ", err))
+		}
 	}
-	it, err := db.NewIterator()
-	if err != nil {
-		panic(err)
-	}
-	for it.HasNext() {
+	it := db.NewIterator()
+	for {
 		dbKey, dbValue, err := it.ReadNextKeyValue()
+		if err == cdb.ErrNoData {
+			break
+		}
 		if err != nil {
 			panic(err)
 		}
@@ -157,23 +186,20 @@ func assertDbEqual(db *cdb.Cdb) {
 }
 
 func TestOpen2(t *testing.T) {
-	db, err := cdb.Open("testdata/test.cdb")
+	db, err := cdb.OpenFile("testdata/test.cdb")
 	if err != nil {
 		panic(err)
 	}
-	it, err := db.NewIterator()
-	if err != nil {
-		panic(err)
-	}
-	n, err := db.GetRecordNum()
-	if err != nil {
-		panic(err)
-	}
+	it := db.NewIterator()
+	n := db.GetRecordNum()
 	if n != 9 {
 		panic("expect n == 9 : " + strconv.Itoa(n))
 	}
-	for it.HasNext() {
+	for {
 		_, _, err := it.ReadNextKeyValue()
+		if err == cdb.ErrNoData {
+			break
+		}
 		if err != nil {
 			panic(err)
 		}
@@ -185,24 +211,21 @@ func TestOpen2(t *testing.T) {
 }
 
 func TestOpen(t *testing.T) {
-	db, err := cdb.Open("testdata/random.cdb")
+	db, err := cdb.OpenFile("testdata/random.cdb")
 	if err != nil {
 		panic(err)
 	}
-	it, err := db.NewIterator()
-	if err != nil {
-		panic(err)
-	}
-	n, err := db.GetRecordNum()
-	if err != nil {
-		panic(err)
-	}
+	n := db.GetRecordNum()
 	if n != 100 {
 		panic("expect n == 100 " + strconv.Itoa(n))
 	}
 	var cnt int
-	for it.HasNext() {
+	it := db.NewIterator()
+	for {
 		_, _, err := it.ReadNextKeyValue()
+		if err == cdb.ErrNoData {
+			break
+		}
 		if err != nil {
 			panic(err)
 		}
