@@ -17,10 +17,8 @@ type CdbIterator struct {
 type cdbFindIterator struct { // 查找某个key的value
 	key         []byte
 	supperIndex index
-	keyLen      uint32
 	keyHash     uint32
 	loop        uint32
-	slotPos     uint32
 }
 
 type cdbSequenceIterator struct { // 从头读到尾
@@ -28,7 +26,7 @@ type cdbSequenceIterator struct { // 从头读到尾
 	rpos   uint32
 }
 
-func (this *Cdb) NewIterator() (it *CdbIterator) {
+func (this *Cdb) BeginIterator() (it *CdbIterator) {
 	return &CdbIterator{
 		c: this,
 		seq: &cdbSequenceIterator{
@@ -41,56 +39,19 @@ func (this *Cdb) NewIterator() (it *CdbIterator) {
 func (this *CdbIterator) ReadNextKeyValue() (key []byte, value []byte, err error) {
 	if this.seq != nil {
 		key, value, _, err = this.seqReadNextImpl(false)
-		return key, value, err
+	} else {
+		key, value, _, err = this.findReadNextImpl(false)
 	}
-	var buf []byte
-	for {
-		if this.find.loop >= this.find.supperIndex.entryListLength {
-			return nil, nil, ErrNoData
-		}
-		slotKeyHash, slotKeyPos, err := this.c.readTupleUint32(this.find.slotPos)
-		if err != nil {
-			return nil, nil, err
-		}
-		if slotKeyPos == 0 {
-			return nil, nil, ErrNoData
-		}
-		if slotKeyHash != this.find.keyHash {
-			this.nextLoop()
-			continue
-		}
-		rklen, rvlen, err := this.c.readTupleUint32(slotKeyPos)
-		if err != nil {
-			return nil, nil, err
-		}
-		if rklen != this.find.keyLen {
-			this.nextLoop()
-			continue
-		}
-		keyValueLength := int(rklen + rvlen)
-		if keyValueLength > cap(buf) {
-			buf = make([]byte, keyValueLength)
-		}
-		buf = buf[:keyValueLength]
-		err = this.c.read(buf, slotKeyPos+8)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !bytes.Equal(this.find.key, buf[:rklen]) {
-			this.nextLoop()
-			continue
-		}
-		this.nextLoop()
-		return this.find.key, buf[rklen:], nil
-	}
+	return key, value, err
 }
 
 func (this *CdbIterator) ReadNextKey() (key []byte, vdata *io.SectionReader, err error) {
 	if this.seq != nil {
 		key, _, vdata, err = this.seqReadNextImpl(true)
-		return key, vdata, err
+	} else {
+		key, _, vdata, err = this.findReadNextImpl(true)
 	}
-	return nil, nil, errors.New("cdb: ReadNextKey() only support sequence iterator.")
+	return key, vdata, err
 }
 
 func (this *CdbIterator) seqReadNextImpl(onlyKey bool) (key []byte, value []byte, vdata *io.SectionReader, err error) {
@@ -121,10 +82,56 @@ func (this *CdbIterator) seqReadNextImpl(onlyKey bool) (key []byte, value []byte
 	return key, value, vdata, err
 }
 
-func (this *CdbIterator) nextLoop() {
-	this.find.loop++
-	this.find.slotPos += 8
-	if this.find.slotPos == this.find.supperIndex.entryListPos+(this.find.supperIndex.entryListLength*8) {
-		this.find.slotPos = this.find.supperIndex.entryListPos
+func (this *CdbIterator) findReadNextImpl(onlyKey bool) (key []byte, value []byte, vdata *io.SectionReader, err error) {
+	key = this.find.key
+	var buf []byte
+	for {
+		if this.find.loop >= this.find.supperIndex.entryListLength {
+			return key, nil, nil, ErrNoData
+		}
+		slotPos := this.find.supperIndex.entryListPos + (((this.find.keyHash/entryTableSize + this.find.loop) % this.find.supperIndex.entryListLength) * 8)
+		slotKeyHash, slotKeyPos, err := this.c.readTupleUint32(slotPos)
+		if err != nil {
+			return key, nil, nil, err
+		}
+		if slotKeyPos == 0 {
+			return key, nil, nil, ErrNoData
+		}
+		if slotKeyHash != this.find.keyHash {
+			this.find.loop++
+			continue
+		}
+		recordKeyLength, recordValueLength, err := this.c.readTupleUint32(slotKeyPos)
+		if err != nil {
+			return key, nil, nil, err
+		}
+		if recordKeyLength != uint32(len(key)) {
+			this.find.loop++
+			continue
+		}
+		var bufLength int
+		if onlyKey {
+			bufLength = int(recordKeyLength)
+		} else {
+			bufLength = int(recordKeyLength + recordValueLength)
+		}
+		if bufLength > cap(buf) {
+			buf = make([]byte, bufLength)
+		}
+		buf = buf[:bufLength]
+		err = this.c.read(buf, slotKeyPos+8)
+		if err != nil {
+			return key, nil, nil, err
+		}
+		this.find.loop++
+		if !bytes.Equal(this.find.key, buf[:recordKeyLength]) {
+			continue
+		}
+		if onlyKey {
+			vdata = io.NewSectionReader(this.c.r, int64(slotKeyPos+8+recordKeyLength), int64(recordValueLength))
+		} else {
+			value = buf[recordKeyLength:]
+		}
+		return key, value, vdata, nil
 	}
 }

@@ -71,24 +71,32 @@ func OpenReaderAt(r io.ReaderAt) (db *Cdb, err error) {
 }
 
 func (this *Cdb) GetValue(key []byte) (value []byte, err error) {
-	_, value, err = this.FindKey(key).ReadNextKeyValue()
+	_, value, err = this.BeginFindKey(key).ReadNextKeyValue()
 	return value, err
 }
 
-func (this *Cdb) FindKey(key []byte) (it *CdbIterator) {
+func (this *Cdb) BeginFindKey(key []byte) (it *CdbIterator) {
 	keyHash := checksum(key)
-	supperIndex := this.header[keyHash%entryTableSize]
 	return &CdbIterator{
 		c: this,
 		find: &cdbFindIterator{
 			key:         key,
-			keyLen:      uint32(len(key)),
 			keyHash:     keyHash,
-			supperIndex: supperIndex,
+			supperIndex: this.header[keyHash%entryTableSize],
 			loop:        0,
-			slotPos:     supperIndex.entryListPos + (((keyHash / entryTableSize) % supperIndex.entryListLength) * 8),
 		},
 	}
+}
+
+func (this *Cdb) IsKeyExists(key []byte) (exists bool, err error) {
+	_, _, err = this.BeginFindKey(key).ReadNextKey()
+	if err == ErrNoData {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (this *Cdb) read(buf []byte, pos uint32) error {

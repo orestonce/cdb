@@ -43,7 +43,7 @@ func TestNewMemoryBuilder(t *testing.T) {
 	if num != 0 {
 		panic("expected 0 num: " + strconv.Itoa(num))
 	}
-	it := db.NewIterator()
+	it := db.BeginIterator()
 	if _, _, err = it.ReadNextKeyValue(); err != cdb.ErrNoData {
 		panic("expect !it.HasNext()")
 	}
@@ -144,7 +144,7 @@ func TestNewFileBuilder(t *testing.T) {
 
 func assertDbEqual(db *cdb.Cdb) {
 	for key, valueList := range keyValueMap {
-		it := db.FindKey([]byte(key))
+		it := db.BeginFindKey([]byte(key))
 		for idx, value := range valueList {
 			_, dbValue, err := it.ReadNextKeyValue()
 			if err != nil {
@@ -159,7 +159,7 @@ func assertDbEqual(db *cdb.Cdb) {
 			panic(fmt.Sprint("unexpected error ", err))
 		}
 	}
-	it := db.NewIterator()
+	it := db.BeginIterator()
 	for {
 		dbKey, dbValue, err := it.ReadNextKeyValue()
 		if err == cdb.ErrNoData {
@@ -190,7 +190,7 @@ func TestOpen2(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	it := db.NewIterator()
+	it := db.BeginIterator()
 	n := db.GetRecordNum()
 	if n != 9 {
 		panic("expect n == 9 : " + strconv.Itoa(n))
@@ -220,7 +220,7 @@ func TestOpen(t *testing.T) {
 		panic("expect n == 100 " + strconv.Itoa(n))
 	}
 	var cnt int
-	it := db.NewIterator()
+	it := db.BeginIterator()
 	for {
 		_, _, err := it.ReadNextKeyValue()
 		if err == cdb.ErrNoData {
