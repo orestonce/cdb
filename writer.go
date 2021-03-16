@@ -29,7 +29,7 @@ func NewFileWriter(name string) (m *CdbWriter, err error) {
 	return &CdbWriter{
 		f:       f,
 		b:       nil,
-		htables: [256][]slot{},
+		htables: [entryTableSize][]slot{},
 		pos:     headerSize,
 	}, nil
 }
@@ -38,7 +38,7 @@ func NewMemoryWriter() (m *CdbWriter) {
 	return &CdbWriter{
 		f:       nil,
 		b:       bytes.NewBuffer(make([]byte, headerSize)),
-		htables: [256][]slot{},
+		htables: [entryTableSize][]slot{},
 		pos:     headerSize,
 	}
 }
