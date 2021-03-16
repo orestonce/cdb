@@ -1,8 +1,8 @@
 package cdb_test
 
 import (
-	"testing"
 	"github.com/orestonce/cdb"
+	"testing"
 )
 
 func TestNewMemoryWriter(t *testing.T) {
@@ -15,5 +15,16 @@ func TestNewMemoryWriter(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	db.BeginFindKey()
+	it := db.BeginFindKey([]byte("key"))
+	_, value, err := it.ReadNextKeyValue()
+	if err != nil {
+		panic(err)
+	}
+	if string(value) != `value` {
+		panic("value check failed : " + string(value))
+	}
+	_, _, err = it.ReadNextKeyValue()
+	if err != cdb.ErrNoData {
+		panic("expect ErrNoData")
+	}
 }
