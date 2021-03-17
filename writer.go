@@ -9,10 +9,15 @@ import (
 	"strconv"
 )
 
+var ErrCdbWriteBiggerThan4GB = errors.New("cdb: file size is limited to 4GB")
+
+const limit4GB = 1<<32 - 1
+
 type CdbWriter struct {
 	f         *os.File      // 1
 	b         *bytes.Buffer // 2
 	htables   [entryTableSize][]slot
+	recordNum uint32
 	pos       uint32
 	isFreezed bool
 }
@@ -47,6 +52,9 @@ func (this *CdbWriter) WriteKeyValue(key []byte, data []byte) (err error) {
 	if this.isFreezed {
 		return this.invalidFreezeState()
 	}
+	if uint64(this.pos)+uint64(len(key))+uint64(len(data))+uint64(this.recordNum)*24 > limit4GB {
+		return ErrCdbWriteBiggerThan4GB
+	}
 	klen, dlen := uint32(len(key)), uint32(len(data))
 	w := this.getWriter()
 	err = writeNums(w, klen, dlen)
@@ -65,6 +73,7 @@ func (this *CdbWriter) WriteKeyValue(key []byte, data []byte) (err error) {
 	tableNum := h % entryTableSize
 	this.htables[tableNum] = append(this.htables[tableNum], slot{h, this.pos})
 	this.pos += 8 + klen + dlen
+	this.recordNum++
 	return nil
 }
 
