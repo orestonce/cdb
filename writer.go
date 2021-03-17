@@ -52,7 +52,7 @@ func (this *CdbWriter) WriteKeyValue(key []byte, data []byte) (err error) {
 	if this.isFreezed {
 		return this.invalidFreezeState()
 	}
-	if uint64(this.pos)+uint64(len(key))+uint64(len(data))+uint64(this.recordNum)*24 > limit4GB {
+	if uint64(this.GetByteNum())+uint64(len(key))+uint64(len(data))+24 > limit4GB {
 		return ErrCdbWriteBiggerThan4GB
 	}
 	klen, dlen := uint32(len(key)), uint32(len(data))
@@ -75,6 +75,13 @@ func (this *CdbWriter) WriteKeyValue(key []byte, data []byte) (err error) {
 	this.pos += 8 + klen + dlen
 	this.recordNum++
 	return nil
+}
+
+func (this *CdbWriter) GetByteNum() uint32 {
+	if this.isFreezed {
+		return this.pos
+	}
+	return this.pos + this.recordNum*16
 }
 
 func (this *CdbWriter) getWriter() io.Writer {
@@ -161,12 +168,15 @@ func (this *CdbWriter) Close() (err error) {
 	return nil
 }
 
-func (this *CdbWriter) GetBytes() (bs []byte, err error) {
-	if !this.isFreezed {
-		return nil, this.invalidFreezeState()
-	}
+func (this *CdbWriter) GetMemoryWriterBytes() (bs []byte, err error) {
 	if this.b == nil {
-		return nil, errors.New("cdb: GetBytes() only support memory writer.")
+		return nil, errors.New("cdb: GetMemoryWriterBytes() only support memory writer")
+	}
+	if !this.isFreezed {
+		_, err = this.Freeze()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return this.b.Bytes(), nil
 }

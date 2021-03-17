@@ -47,8 +47,10 @@ func TestCdb_NewIterator(t *testing.T) {
 	if err != cdb.ErrNoData {
 		panic(fmt.Sprint("unexpect error value", err))
 	}
-	_ = db.Close()
-	content, err := writer.GetBytes()
+	if writer.GetByteNum() != 2282 {
+		panic("unexpected ByteNum: " + strconv.Itoa(int(writer.GetByteNum())))
+	}
+	content, err := writer.GetMemoryWriterBytes()
 	if err != nil {
 		panic(err)
 	}
