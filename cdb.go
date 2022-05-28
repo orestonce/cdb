@@ -52,6 +52,7 @@ func (this *Cdb) Close() (err error) {
 }
 
 // OpenReaderAt creates a new Cdb from the given ReaderAt, which should be a cdb format database.
+// Example: bytes.Reader/strings.Reader/os.File
 func OpenReaderAt(r io.ReaderAt) (db *Cdb, err error) {
 	db = &Cdb{
 		r: r,
